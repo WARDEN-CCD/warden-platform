@@ -30,7 +30,7 @@ on:
 permissions: {}
 jobs:
   delivery:
-    uses: WARDEN_ORG/warden-platform/.github/workflows/build-sign-attest.yml@v1.0.0
+    uses: WARDEN-CCD/warden-platform/.github/workflows/build-sign-attest.yml@v1.0.0
     permissions:
       contents: read
       packages: write
