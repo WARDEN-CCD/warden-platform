@@ -9,7 +9,7 @@ Decision: hub ADR-017. Implementation: weeks 8–9.
 ### `warden new <name> [--db] [--owner <team>] [--dry-run]`
 
 1. Validate `<name>` (DNS label, ≤ 30 chars, not taken).
-2. Render `templates/spring-service` with `warden.yaml` values; create `WARDEN_ORG/svc-<name>` (public),
+2. Render `templates/spring-service` with `warden.yaml` values; create `WARDEN-CCD/svc-<name>` (public),
    push the initial commit.
 3. Apply repo settings: branch ruleset on `main` (PR + 1 review + checks), Actions allowed-list, GHCR package
    public after first push, secret `WARDEN_PROMOTER_PRIVATE_KEY` + variable `WARDEN_PROMOTER_APP_ID`.
@@ -25,7 +25,7 @@ Runs the same checks as admission, locally, and explains each one:
 ```
 ✔ signature        keyless, subject …/build-sign-attest.yml@refs/tags/v1.2.0, issuer token.actions…
 ✔ transparency log  Rekor inclusion proof present
-✔ provenance        SLSA v1, repo WARDEN_ORG/svc-books, ref refs/heads/main, commit 3f2a…
+✔ provenance        SLSA v1, repo WARDEN-CCD/svc-books, ref refs/heads/main, commit 3f2a…
 ✔ sbom              CycloneDX, 143 components
 ! vulnerabilities  2 HIGH, 0 CRITICAL (audit only)
 → would be ADMITTED
