@@ -1,0 +1,8 @@
+.env
+*.pem
+kubeconfig*
+__pycache__/
+.idea/
+dist/
+cli/bin/
+target/

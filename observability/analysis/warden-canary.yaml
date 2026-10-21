@@ -1,0 +1,60 @@
+# DRAFT — encodes ADR-015; not yet exercised.
+# Canary health for every Warden service. Used by the Rollout steps generated from the service template:
+#   analysis:
+#     templates: [{templateName: warden-canary, clusterScope: true}]
+#     args:
+#       - {name: namespace, valueFrom: {fieldRef: {fieldPath: metadata.namespace}}}
+#       - {name: canary-hash, valueFrom: {podTemplateHashValue: Latest}}
+# Requires: the template's PodMonitor copies the pod label rollouts-pod-template-hash to the Prometheus label
+# rollouts_pod_template_hash, and Micrometer publishes http.server.requests histograms
+# (management.metrics.distribution.percentiles-histogram.http.server.requests=true).
+apiVersion: argoproj.io/v1alpha1
+kind: ClusterAnalysisTemplate
+metadata:
+  name: warden-canary
+spec:
+  args:
+    - name: namespace
+    - name: canary-hash
+    - name: prometheus
+      value: http://kube-prometheus-stack-prometheus.monitoring.svc:9090
+  metrics:
+    # Guard: never judge on too little traffic. Neither condition true → Inconclusive → rollout pauses.
+    - name: sample-size
+      interval: 1m
+      count: 2
+      successCondition: "len(result) > 0 && result[0] >= 200"
+      failureCondition: "false"
+      provider:
+        prometheus:
+          address: "{{args.prometheus}}"
+          query: |
+            sum(increase(http_server_requests_seconds_count{
+              namespace="{{args.namespace}}", rollouts_pod_template_hash="{{args.canary-hash}}"}[2m]))
+    - name: success-rate
+      interval: 1m
+      count: 2
+      failureLimit: 0
+      successCondition: "len(result) > 0 && !isNaN(result[0]) && result[0] >= 0.99"
+      failureCondition: "len(result) > 0 && !isNaN(result[0]) && result[0] < 0.95"
+      provider:
+        prometheus:
+          address: "{{args.prometheus}}"
+          query: |
+            sum(rate(http_server_requests_seconds_count{
+              namespace="{{args.namespace}}", rollouts_pod_template_hash="{{args.canary-hash}}", status!~"5.."}[2m]))
+            /
+            sum(rate(http_server_requests_seconds_count{
+              namespace="{{args.namespace}}", rollouts_pod_template_hash="{{args.canary-hash}}"}[2m]))
+    - name: latency-p95
+      interval: 1m
+      count: 2
+      failureLimit: 0
+      successCondition: "len(result) > 0 && !isNaN(result[0]) && result[0] < 0.300"
+      failureCondition: "len(result) > 0 && !isNaN(result[0]) && result[0] >= 0.500"
+      provider:
+        prometheus:
+          address: "{{args.prometheus}}"
+          query: |
+            histogram_quantile(0.95, sum by (le) (rate(http_server_requests_seconds_bucket{
+              namespace="{{args.namespace}}", rollouts_pod_template_hash="{{args.canary-hash}}"}[2m])))
