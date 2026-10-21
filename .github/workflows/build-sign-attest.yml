@@ -107,27 +107,29 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
       - name: Install Syft and Trivy as verified binaries (ADR-011)
-        # TODO(S1): tighten the identity regexps to each project's exact release workflow file.
+        # Signer identities observed in spike S1 (hub evidence/spikes/S1.md). Re-check when bumping versions.
         run: |
           set -euo pipefail
           cd "$RUNNER_TEMP"
-          verify() {  # $1 = checksums file, $2 = identity regexp
+          verify() {  # $1 = checksums file, $2 = exact certificate identity
             cosign verify-blob --bundle "$1.sigstore.json" \
               --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-              --certificate-identity-regexp "$2" "$1"
+              --certificate-identity "$2" "$1"
             sha256sum --check --ignore-missing "$1"
           }
           t="https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}"
           curl -sSfLO "$t/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
           curl -sSfLO "$t/trivy_${TRIVY_VERSION}_checksums.txt"
           curl -sSfLO "$t/trivy_${TRIVY_VERSION}_checksums.txt.sigstore.json"
-          verify "trivy_${TRIVY_VERSION}_checksums.txt" '^https://github\.com/aquasecurity/trivy/'
+          verify "trivy_${TRIVY_VERSION}_checksums.txt" \
+            "https://github.com/aquasecurity/trivy/.github/workflows/reusable-release.yaml@refs/tags/v${TRIVY_VERSION}"
           tar -xzf "trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" trivy
           s="https://github.com/anchore/syft/releases/download/v${SYFT_VERSION}"
           curl -sSfLO "$s/syft_${SYFT_VERSION}_linux_amd64.tar.gz"
           curl -sSfLO "$s/syft_${SYFT_VERSION}_checksums.txt"
           curl -sSfLO "$s/syft_${SYFT_VERSION}_checksums.txt.sigstore.json"
-          verify "syft_${SYFT_VERSION}_checksums.txt" '^https://github\.com/anchore/syft/'
+          verify "syft_${SYFT_VERSION}_checksums.txt" \
+            "https://github.com/anchore/syft/.github/workflows/release.yaml@refs/heads/main"
           tar -xzf "syft_${SYFT_VERSION}_linux_amd64.tar.gz" syft
           echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
       - name: SBOM (CycloneDX)
