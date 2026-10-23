@@ -11,12 +11,16 @@ Decision: hub ADR-017. Implementation: weeks 8–9.
 1. Validate `<name>` (DNS label, ≤ 30 chars, not taken).
 2. Render `templates/spring-service` with `warden.yaml` values; create `WARDEN-CCD/svc-<name>` (public),
    push the initial commit.
-3. Apply repo settings: branch ruleset on `main` (PR + 1 review + checks), Actions allowed-list, GHCR package
-   public after first push, secret `WARDEN_PROMOTER_PRIVATE_KEY` + variable `WARDEN_PROMOTER_APP_ID`.
-4. Open a PR in `warden-gitops` adding `apps/<name>/` (namespace, Rollout with placeholder digest, Services,
+3. Apply repo settings: branch ruleset on `main` (PR + 1 review + checks), Actions allowed-list, secret
+   `WARDEN_PROMOTER_PRIVATE_KEY` + variable `WARDEN_PROMOTER_APP_ID`.
+4. **Make the image public (hub ADR-028).** GitHub has no API for package visibility, so after the first push
+   the CLI prints and opens `https://github.com/orgs/WARDEN-CCD/packages/container/svc-<name>/settings`, then
+   polls an *anonymous* manifest fetch of the new digest until it succeeds. The wait is recorded as
+   `manual_steps: 1` in the timing JSON.
+5. Open a PR in `warden-gitops` adding `apps/<name>/` (namespace, Rollout with placeholder digest, Services,
    HTTPRoute, PodMonitor, `Database` if `--db`, NetworkPolicy, HPA).
-5. Wait for: first CI run green → bot digest PR merged → Argo CD Synced → Rollout Healthy.
-6. Print a timing breakdown; append it as JSON to `evidence/scaffold-timings/` in the hub (E1).
+6. Wait for: first CI run green → bot digest PR merged → Argo CD Synced → Rollout Healthy.
+7. Print a timing breakdown; append it as JSON to `evidence/scaffold-timings/` in the hub (E1).
 
 ### `warden verify <image@sha256:…> [--policy-ref <tag>]`
 
