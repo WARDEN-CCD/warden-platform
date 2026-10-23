@@ -14,6 +14,12 @@ Trusted build workflow, `warden` CLI (Go), service template, observability. Work
 - Push/sign/promote only on `push` to `refs/heads/main`.
 - Run zizmor on any workflow change.
 
+## Local build rules
+
+- Taskfiles load `dotenv: ['{{.USERPROFILE}}/.warden/env', '{{.HOME}}/.warden/env']` and prefix every Maven
+  command with `{{.WITH_JDK}}` (defined as in the hub Taskfile). Task cannot override an OS `JAVA_HOME` via
+  `env:`, and team members keep other JDKs globally. See hub CONTRIBUTING "Local setup".
+
 ## CLI rules
 
 - Go module under `cli/`; `go test ./...` must pass; no network calls in unit tests (use fakes).
