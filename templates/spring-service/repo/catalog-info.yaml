@@ -1,0 +1,13 @@
+# Backstage-compatible catalog entry (ADR-017).
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: [[ .Repo ]]
+  description: Warden service [[ .Name ]]
+  annotations:
+    github.com/project-slug: [[ .Org ]]/[[ .Repo ]]
+spec:
+  type: service
+  lifecycle: experimental
+  owner: [[ .Owner ]]
+  system: warden

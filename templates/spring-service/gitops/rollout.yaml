@@ -1,0 +1,100 @@
+# Progressive delivery (hub DESIGN §9, ADR-015). Only the image digest below is changed after creation, and
+# only by digest-only promotion PRs (ADR-013).
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: [[ .Name ]]
+  namespace: svc-[[ .Name ]]
+spec:
+  replicas: 2
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: [[ .Name ]]
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: [[ .Name ]]
+        app.kubernetes.io/part-of: warden
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: app
+          image: [[ .Image ]]@[[ .Digest ]]
+          ports:
+            - name: http
+              containerPort: 8080
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+  strategy:
+    canary:
+      stableService: [[ .Name ]]-stable
+      canaryService: [[ .Name ]]-canary
+      trafficRouting:
+        plugins:
+          argoproj-labs/gatewayAPI:
+            httpRoute: [[ .Name ]]
+            namespace: svc-[[ .Name ]]
+      steps:
+        - setWeight: 5
+        - analysis:
+            templates:
+              - templateName: warden-canary
+                clusterScope: true
+            args:
+              - name: namespace
+                valueFrom:
+                  fieldRef:
+                    fieldPath: metadata.namespace
+              - name: canary-hash
+                valueFrom:
+                  podTemplateHashValue: Latest
+        - setWeight: 25
+        - analysis:
+            templates:
+              - templateName: warden-canary
+                clusterScope: true
+            args:
+              - name: namespace
+                valueFrom:
+                  fieldRef:
+                    fieldPath: metadata.namespace
+              - name: canary-hash
+                valueFrom:
+                  podTemplateHashValue: Latest
+        - setWeight: 50
+        - pause:
+            duration: 1m

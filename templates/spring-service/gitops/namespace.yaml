@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: svc-[[ .Name ]]
+  labels:
+    warden.dev/expose: "true"       # Gateway "warden" accepts HTTPRoutes from this namespace
+    warden.dev/monitored: "true"    # Prometheus discovers this namespace's PodMonitor
+    warden.dev/owner: "[[ .Owner ]]"

@@ -211,6 +211,11 @@ jobs:
           gitops="${GITHUB_REPOSITORY_OWNER}/${GITOPS_REPO}"
           gh repo clone "$gitops" gitops -- --depth 1
           cd gitops
+          if [ ! -f "apps/${svc}/rollout.yaml" ]; then
+            # First build of a new service: `warden new` registers apps/<svc>/ with this digest itself.
+            echo "::notice::apps/${svc}/ not in ${gitops} yet; skipping promotion (warden new registers it)"
+            exit 0
+          fi
           branch="promote/${svc}/${GITHUB_SHA::12}"
           git switch -c "$branch"
           # Replace exactly the digest of this service's image in its Rollout.
