@@ -1,0 +1,60 @@
+# Continuous synthetic load for canary analysis (hub ADR-015, EVALUATION E3). 40 rps per service through the
+# gateway (so canary weights apply), from the k6-operator namespace (platform-exempt: the k6 image is not a
+# Warden-built image). `cleanup: post` deletes the TestRun when DURATION ends; Argo CD self-heal recreates it,
+# so load is continuous. Sample size at a 5 % canary over 2 min: 0.05 x 40 x 120 = 240 requests >= 200 guard.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: warden-load
+  namespace: k6-operator-system
+data:
+  load.js: |
+    import http from 'k6/http';
+    import { check } from 'k6';
+
+    const GATEWAY = __ENV.GATEWAY || 'http://warden-gateway.envoy-gateway-system.svc';
+    const SERVICES = (__ENV.SERVICES || 'books,loans,members,notify').split(',');
+    const RATE = parseInt(__ENV.RATE || '40', 10);
+    const DURATION = __ENV.DURATION || '6h';
+
+    export const options = { discardResponseBodies: true, scenarios: {} };
+    for (const svc of SERVICES) {
+      options.scenarios[svc] = {
+        executor: 'constant-arrival-rate', rate: RATE, timeUnit: '1s', duration: DURATION,
+        preAllocatedVUs: 10, maxVUs: 60, exec: 'hit', env: { SVC: svc },
+      };
+    }
+
+    export function hit() {
+      const res = http.get(`${GATEWAY}/api/items`, {
+        headers: { Host: `${__ENV.SVC}.warden.localhost` }, tags: { service: __ENV.SVC },
+      });
+      check(res, { '2xx': (r) => r.status >= 200 && r.status < 300 });
+    }
+---
+apiVersion: k6.io/v1alpha1
+kind: TestRun
+metadata:
+  name: warden-load
+  namespace: k6-operator-system
+spec:
+  parallelism: 1
+  cleanup: post
+  arguments: --quiet --no-summary
+  script:
+    configMap:
+      name: warden-load
+      file: load.js
+  runner:
+    image: grafana/k6:2.3.0@sha256:2dd4756ec6e14e62778916e1eb850108e4b499304c02df56760fa0bdb0fba0b8
+    env:
+      - name: RATE
+        value: "40"
+      - name: DURATION
+        value: "6h"
+    resources:
+      requests:
+        cpu: 200m
+        memory: 128Mi
+      limits:
+        memory: 512Mi
