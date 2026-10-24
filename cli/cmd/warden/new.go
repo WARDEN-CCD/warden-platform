@@ -24,6 +24,7 @@ type timing struct {
 	Steps       []timingStep `json:"steps"`
 	TotalS      float64      `json:"total_s"`
 	ManualSteps int          `json:"manual_steps"`
+	Resumed     bool         `json:"resumed,omitempty"`
 	Result      string       `json:"result"`
 }
 
@@ -34,12 +35,38 @@ type timingStep struct {
 	Note    string  `json:"note,omitempty"`
 }
 
+// scaffold carries the state of one `warden new` run.
+type scaffold struct {
+	t        *timing
+	v        render.Values
+	full     string // WARDEN-CCD/svc-<name>
+	sha      string // commit the first image is built from
+	work     string // temporary working directory
+	deadline time.Time
+}
+
+// step runs fn, prints its outcome and records its duration.
+func (s *scaffold) step(name string, fn func() (string, error)) error {
+	fmt.Printf("▶ %s\n", name)
+	start := time.Now()
+	note, err := fn()
+	ts := timingStep{Name: name, Seconds: round(time.Since(start).Seconds()), Note: note}
+	s.t.Steps = append(s.t.Steps, ts)
+	if err != nil {
+		fmt.Printf("  ✘ %v\n", err)
+		return err
+	}
+	fmt.Printf("  ✔ %.0fs %s\n", ts.Seconds, note)
+	return nil
+}
+
 func cmdNew(args []string) error {
 	fs := flag.NewFlagSet("new", flag.ContinueOnError)
 	owner := fs.String("owner", "warden-maintainers", "owning GitHub team")
 	ref := fs.String("platform-ref", "v0.1.0", "warden-platform workflow tag the service builds with")
 	dryRun := fs.Bool("dry-run", false, "render into a temporary directory and stop")
 	noMerge := fs.Bool("no-merge", false, "leave the warden-gitops PR for human review instead of merging it")
+	resume := fs.Bool("resume", false, "continue with an existing svc-<name> repo (e.g. after fixing a failed first build)")
 	evidence := fs.String("evidence", "", "directory for the timing JSON (default: <hub>/evidence/scaffold-timings)")
 	timeout := fs.Duration("timeout", 45*time.Minute, "overall timeout")
 	pos, err := parse(fs, args)
@@ -47,142 +74,158 @@ func cmdNew(args []string) error {
 		return err
 	}
 	if len(pos) != 1 {
-		return fmt.Errorf("usage: warden new <name> [--owner TEAM] [--platform-ref vX.Y.Z] [--dry-run]")
+		return fmt.Errorf("usage: warden new <name> [--owner TEAM] [--platform-ref vX.Y.Z] [--resume] [--dry-run]")
 	}
 	v, err := render.NewValues(pos[0], *owner, *ref)
 	if err != nil {
 		return err
 	}
-	full := render.Org + "/" + v.Repo
-	t := &timing{Service: v.Name, StartedUTC: time.Now().UTC().Format(time.RFC3339), Result: "failed"}
-	start := time.Now()
-	deadline := start.Add(*timeout)
-	defer func() { t.TotalS = round(time.Since(start).Seconds()); writeTiming(t, *evidence) }()
-
-	step := func(name string, fn func() (string, error)) error {
-		fmt.Printf("▶ %s\n", name)
-		s := time.Now()
-		note, err := fn()
-		ts := timingStep{Name: name, Seconds: round(time.Since(s).Seconds()), Note: note}
-		t.Steps = append(t.Steps, ts)
-		if err != nil {
-			fmt.Printf("  ✘ %v\n", err)
-			return err
-		}
-		fmt.Printf("  ✔ %.0fs %s\n", ts.Seconds, note)
-		return nil
-	}
-
 	work, err := os.MkdirTemp("", "warden-new-")
 	if err != nil {
 		return err
 	}
 	defer os.RemoveAll(work)
-	repoDir := filepath.Join(work, v.Repo)
 
-	if err := step("render template", func() (string, error) {
-		if !*dryRun && gh.RepoExists(full) {
-			return "", fmt.Errorf("%s already exists", full)
+	start := time.Now()
+	s := &scaffold{
+		t:        &timing{Service: v.Name, StartedUTC: start.UTC().Format(time.RFC3339), Result: "failed", Resumed: *resume},
+		v:        v,
+		full:     render.Org + "/" + v.Repo,
+		work:     work,
+		deadline: start.Add(*timeout),
+	}
+	defer func() { s.t.TotalS = round(time.Since(start).Seconds()); writeTiming(s.t, *evidence) }()
+
+	if *resume {
+		err = s.resumeRepo()
+	} else {
+		err = s.createRepo(*dryRun)
+	}
+	if err != nil || *dryRun {
+		return err
+	}
+	return s.deliver(*noMerge)
+}
+
+// createRepo renders the template and publishes it as a new public repository with rulesets.
+func (s *scaffold) createRepo(dryRun bool) error {
+	repoDir := filepath.Join(s.work, s.v.Repo)
+	if err := s.step("render template", func() (string, error) {
+		if !dryRun && gh.RepoExists(s.full) {
+			return "", fmt.Errorf("%s already exists (use --resume to continue with it)", s.full)
 		}
-		files, err := render.Tree(templates.FS, "spring-service/repo", repoDir, v)
+		files, err := render.Tree(templates.FS, "spring-service/repo", repoDir, s.v)
 		return fmt.Sprintf("%d files", len(files)), err
 	}); err != nil {
 		return err
 	}
-	if *dryRun {
-		keep := filepath.Join(os.TempDir(), "warden-dry-run-"+v.Repo)
+	if dryRun {
+		keep := filepath.Join(os.TempDir(), "warden-dry-run-"+s.v.Repo)
 		_ = os.RemoveAll(keep)
 		if err := os.Rename(repoDir, keep); err != nil {
 			return err
 		}
 		fmt.Printf("dry run: rendered into %s\n", keep)
-		t.Result = "dry-run"
+		s.t.Result = "dry-run"
 		return nil
 	}
-
-	var sha string
-	if err := step("create "+full, func() (string, error) {
+	if err := s.step("create "+s.full, func() (string, error) {
 		for _, c := range [][]string{
 			{"init", "-q", "-b", "main"}, {"add", "-A"}, {"update-index", "--chmod=+x", "mvnw"},
-			{"commit", "-q", "-m", "feat: scaffold " + v.Repo + " with warden new"},
+			{"commit", "-q", "-m", "feat: scaffold " + s.v.Repo + " with warden new"},
 		} {
 			if _, err := gh.Run(repoDir, "git", c...); err != nil {
 				return "", err
 			}
 		}
 		var err error
-		if sha, err = gh.Run(repoDir, "git", "rev-parse", "HEAD"); err != nil {
+		if s.sha, err = gh.Run(repoDir, "git", "rev-parse", "HEAD"); err != nil {
 			return "", err
 		}
-		_, err = gh.Run(repoDir, "gh", "repo", "create", full, "--public", "--source", ".", "--push",
-			"--description", "Warden service "+v.Name+" (generated by warden new)")
-		return sha[:12], err
+		_, err = gh.Run(repoDir, "gh", "repo", "create", s.full, "--public", "--source", ".", "--push",
+			"--description", "Warden service "+s.v.Name+" (generated by warden new)")
+		return s.sha[:12], err
+	}); err != nil {
+		return err
+	}
+	return s.step("apply branch rulesets", func() (string, error) {
+		return "main-protection + main-review", applyRulesets(s.full)
+	})
+}
+
+// resumeRepo continues with an existing repository at the current head of main.
+func (s *scaffold) resumeRepo() error {
+	return s.step("resume "+s.full, func() (string, error) {
+		if !gh.RepoExists(s.full) {
+			return "", fmt.Errorf("%s does not exist; run without --resume", s.full)
+		}
+		var head struct {
+			SHA string `json:"sha"`
+		}
+		if err := gh.API(&head, "repos/"+s.full+"/commits/main"); err != nil {
+			return "", err
+		}
+		s.sha = head.SHA
+		return "main at " + s.sha[:12], nil
+	})
+}
+
+// deliver waits for the first signed image, makes it public, registers the service in warden-gitops and
+// waits for the canary rollout.
+func (s *scaffold) deliver(noMerge bool) error {
+	if err := s.step("grant promoter secret to this repo only", func() (string, error) {
+		return grantPromoterSecret(s.full)
+	}); err != nil {
+		return err
+	}
+	if err := s.step("first build: sign, attest, push", func() (string, error) {
+		return waitForRun(s.full, s.sha, s.deadline)
 	}); err != nil {
 		return err
 	}
 
-	if err := step("apply branch rulesets", func() (string, error) {
-		return "main-protection + main-review", applyRulesets(full)
-	}); err != nil {
-		return err
-	}
-
-	if err := step("grant promoter secret to this repo only", func() (string, error) {
-		return grantPromoterSecret(full)
-	}); err != nil {
-		return err
-	}
-
-	if err := step("first build: sign, attest, push", func() (string, error) {
-		return waitForRun(full, sha, deadline)
-	}); err != nil {
-		return err
-	}
-
-	var digest string
-	pkg := strings.ToLower(render.Org) + "/" + v.Repo
-	settings := fmt.Sprintf("https://github.com/orgs/%s/packages/container/%s/settings", render.Org, v.Repo)
+	pkg := strings.ToLower(render.Org) + "/" + s.v.Repo
+	settings := fmt.Sprintf("https://github.com/orgs/%s/packages/container/%s/settings", render.Org, s.v.Repo)
 	visibility := time.Now()
-	fmt.Printf("▶ make the image public (ADR-028: GitHub has no API for this)\n"+
-		"  Open %s → Danger Zone → Change visibility → Public\n", settings)
-	openBrowser(settings)
-	for digest == "" {
-		if time.Now().After(deadline) {
-			return fmt.Errorf("timed out waiting for %s to become public", pkg)
+	digest, err := registry.AnonymousDigest(pkg, s.sha)
+	if err != nil {
+		fmt.Printf("▶ make the image public (ADR-028: GitHub has no API for this)\n"+
+			"  Open %s → Danger Zone → Change visibility → Public\n", settings)
+		openBrowser(settings)
+		for err != nil {
+			if time.Now().After(s.deadline) {
+				return fmt.Errorf("timed out waiting for %s to become public", pkg)
+			}
+			time.Sleep(10 * time.Second)
+			digest, err = registry.AnonymousDigest(pkg, s.sha)
 		}
-		if d, err := registry.AnonymousDigest(pkg, sha); err == nil {
-			digest = d
-			break
-		}
-		time.Sleep(10 * time.Second)
+		s.t.ManualSteps++
+		s.t.Steps = append(s.t.Steps, timingStep{Name: "make image public", Seconds: round(time.Since(visibility).Seconds()),
+			Manual: true, Note: digest})
 	}
-	t.ManualSteps++
-	t.Steps = append(t.Steps, timingStep{Name: "make image public", Seconds: round(time.Since(visibility).Seconds()),
-		Manual: true, Note: digest})
-	fmt.Printf("  ✔ public; digest %s\n", digest)
-	v.Digest = digest
+	fmt.Printf("  ✔ image public; digest %s\n", digest)
+	s.v.Digest = digest
 
 	var prURL string
-	if err := step("register in warden-gitops", func() (string, error) {
+	if err := s.step("register in warden-gitops", func() (string, error) {
 		var err error
-		prURL, err = registerInGitops(work, v, sha, !*noMerge, deadline)
+		prURL, err = registerInGitops(s.work, s.v, s.sha, !noMerge, s.deadline)
 		return prURL, err
 	}); err != nil {
 		return err
 	}
-	if *noMerge {
-		t.Result = "awaiting-review"
+	if noMerge {
+		s.t.Result = "awaiting-review"
 		fmt.Printf("warden-gitops PR left for review: %s\n", prURL)
 		return nil
 	}
-
-	if err := step("Argo CD sync and canary rollout", func() (string, error) {
-		return waitForRollout(v.Name, deadline)
+	if err := s.step("Argo CD sync and canary rollout", func() (string, error) {
+		return waitForRollout(s.v.Name, s.deadline)
 	}); err != nil {
 		return err
 	}
-	t.Result = "ok"
-	fmt.Printf("\n%s is live: http://%s.warden.localhost:18080/api/info (kind)\n", v.Repo, v.Name)
+	s.t.Result = "ok"
+	fmt.Printf("\n%s is live: http://%s.warden.localhost:18080/api/info (kind)\n", s.v.Repo, s.v.Name)
 	return nil
 }
 
