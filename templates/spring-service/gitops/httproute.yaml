@@ -1,4 +1,6 @@
 # Weights are managed by the Argo Rollouts Gateway API plugin during a rollout (ADR-012).
+# Only /api is routed: actuator endpoints (health, prometheus) are reached in-cluster by kubelet and Prometheus,
+# never through the gateway.
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
@@ -11,7 +13,11 @@ spec:
   hostnames:
     - [[ .Name ]].warden.localhost
   rules:
-    - backendRefs:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api
+      backendRefs:
         - name: [[ .Name ]]-stable
           port: 80
           weight: 100

@@ -188,8 +188,10 @@ func wirePromoter(appID int64, pemPath string) error {
 	if err != nil {
 		return err
 	}
+	// Selected repositories only: `warden new` grants each svc-* repo access individually (grantPromoterSecret),
+	// so no other org repository can mint promotion tokens.
 	if _, err := runWithStdin(string(key), "gh", "secret", "set", "WARDEN_PROMOTER_PRIVATE_KEY", "--org", render.Org,
-		"--visibility", "all"); err != nil {
+		"--no-repos-selected"); err != nil {
 		return err
 	}
 	gitops := "repos/" + render.Org + "/warden-gitops"

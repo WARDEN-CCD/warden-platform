@@ -127,6 +127,12 @@ func cmdNew(args []string) error {
 		return err
 	}
 
+	if err := step("grant promoter secret to this repo only", func() (string, error) {
+		return grantPromoterSecret(full)
+	}); err != nil {
+		return err
+	}
+
 	if err := step("first build: sign, attest, push", func() (string, error) {
 		return waitForRun(full, sha, deadline)
 	}); err != nil {
@@ -209,6 +215,22 @@ func applyRulesets(full string) error {
 		}
 	}
 	return nil
+}
+
+// grantPromoterSecret adds the repo to the org secret's selected repositories (the secret is created with no
+// repositories by `warden setup-apps`). Without it the first build still signs and pushes; only promotion is skipped.
+func grantPromoterSecret(full string) (string, error) {
+	var repo struct {
+		ID int64 `json:"id"`
+	}
+	if err := gh.API(&repo, "repos/"+full); err != nil {
+		return "", err
+	}
+	err := gh.API(nil, "-X", "PUT", fmt.Sprintf("orgs/%s/actions/secrets/WARDEN_PROMOTER_PRIVATE_KEY/repositories/%d", render.Org, repo.ID))
+	if err != nil {
+		return "skipped: org secret not set up (run `warden setup-apps`)", nil
+	}
+	return "WARDEN_PROMOTER_PRIVATE_KEY", nil
 }
 
 // waitForRun waits for the delivery workflow run of commit sha on main and requires success.
