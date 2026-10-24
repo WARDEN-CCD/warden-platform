@@ -185,6 +185,8 @@ jobs:
 
   promote:
     needs: [build, sign-attest]
+    # Skipped until `warden setup-apps` has created the promoter app (org variable WARDEN_PROMOTER_APP_ID).
+    if: vars.WARDEN_PROMOTER_APP_ID != ''
     runs-on: ubuntu-24.04
     permissions: {}
     concurrency:
