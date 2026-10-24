@@ -40,7 +40,7 @@ metadata:
 spec:
   parallelism: 1
   cleanup: post
-  arguments: --quiet --no-summary
+  arguments: --quiet          # k6 2.x removed --no-summary
   script:
     configMap:
       name: warden-load
