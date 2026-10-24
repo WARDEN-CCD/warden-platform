@@ -67,6 +67,7 @@ func cmdNew(args []string) error {
 	dryRun := fs.Bool("dry-run", false, "render into a temporary directory and stop")
 	noMerge := fs.Bool("no-merge", false, "leave the warden-gitops PR for human review instead of merging it")
 	resume := fs.Bool("resume", false, "continue with an existing svc-<name> repo (e.g. after fixing a failed first build)")
+	merge := fs.Bool("merge", false, "with --resume: merge the warden-gitops PR without review (resume defaults to review)")
 	evidence := fs.String("evidence", "", "directory for the timing JSON (default: <hub>/evidence/scaffold-timings)")
 	timeout := fs.Duration("timeout", 45*time.Minute, "overall timeout")
 	pos, err := parse(fs, args)
@@ -104,7 +105,8 @@ func cmdNew(args []string) error {
 	if err != nil || *dryRun {
 		return err
 	}
-	return s.deliver(*noMerge)
+	// A resumed repo may have received commits nobody reviewed; register it for review unless told otherwise.
+	return s.deliver(*noMerge || (*resume && !*merge))
 }
 
 // createRepo renders the template and publishes it as a new public repository with rulesets.
@@ -153,9 +155,11 @@ func (s *scaffold) createRepo(dryRun bool) error {
 	})
 }
 
-// resumeRepo continues with an existing repository at the current head of main.
+// resumeRepo continues with an existing repository at the current head of main. It re-applies missing rulesets
+// and reports every commit on main that did not arrive through a pull request, so the operator sees exactly
+// what was not reviewed before anything is registered for deployment.
 func (s *scaffold) resumeRepo() error {
-	return s.step("resume "+s.full, func() (string, error) {
+	if err := s.step("resume "+s.full, func() (string, error) {
 		if !gh.RepoExists(s.full) {
 			return "", fmt.Errorf("%s does not exist; run without --resume", s.full)
 		}
@@ -167,6 +171,54 @@ func (s *scaffold) resumeRepo() error {
 		}
 		s.sha = head.SHA
 		return "main at " + s.sha[:12], nil
+	}); err != nil {
+		return err
+	}
+	if err := s.step("check branch rulesets", func() (string, error) {
+		var have []struct {
+			Name string `json:"name"`
+		}
+		if err := gh.API(&have, "repos/"+s.full+"/rulesets"); err != nil {
+			return "", err
+		}
+		names := map[string]bool{}
+		for _, r := range have {
+			names[r.Name] = true
+		}
+		if names["main-protection"] && names["main-review"] {
+			return "present", nil
+		}
+		return "re-applied", applyRulesets(s.full)
+	}); err != nil {
+		return err
+	}
+	return s.step("list commits that bypassed review", func() (string, error) {
+		var commits []struct {
+			SHA    string `json:"sha"`
+			Commit struct {
+				Message string `json:"message"`
+			} `json:"commit"`
+		}
+		if err := gh.API(&commits, "repos/"+s.full+"/commits?sha=main&per_page=50"); err != nil {
+			return "", err
+		}
+		var direct []string
+		for i, c := range commits {
+			if i == len(commits)-1 {
+				break // the scaffold commit itself
+			}
+			var prs []any
+			if err := gh.API(&prs, "repos/"+s.full+"/commits/"+c.SHA+"/pulls"); err == nil && len(prs) == 0 {
+				direct = append(direct, c.SHA[:12]+" "+strings.SplitN(c.Commit.Message, "\n", 2)[0])
+			}
+		}
+		if len(direct) == 0 {
+			return "none", nil
+		}
+		for _, d := range direct {
+			fmt.Printf("  ! pushed without a PR: %s\n", d)
+		}
+		return fmt.Sprintf("%d direct push(es) (ADR-027 owner bypass?)", len(direct)), nil
 	})
 }
 
