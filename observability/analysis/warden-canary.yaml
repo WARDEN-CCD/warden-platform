@@ -1,4 +1,4 @@
-# DRAFT — encodes ADR-015; not yet exercised.
+# DRAFT — encodes ADR-015; exercised on kind (E3), not yet signed off.
 # Canary health for every Warden service. Used by the Rollout steps generated from the service template:
 #   analysis:
 #     templates: [{templateName: warden-canary, clusterScope: true}]
@@ -8,6 +8,11 @@
 # Requires: the template's PodMonitor copies the pod label rollouts-pod-template-hash to the Prometheus label
 # rollouts_pod_template_hash, and Micrometer publishes http.server.requests histograms
 # (management.metrics.distribution.percentiles-histogram.http.server.requests=true).
+#
+# initialDelay: the AnalysisRun starts seconds after the canary pod; measuring at once returns an empty vector,
+# which is Inconclusive and pauses the rollout. 2m fills the [2m] windows (15 s scrape interval).
+# uri!~"/actuator.*": kubelet probes and Prometheus scrapes always succeed and would dilute the error rate.
+# Injected faults answer before handler mapping, so their uri is UNKNOWN; they must stay in.
 apiVersion: argoproj.io/v1alpha1
 kind: ClusterAnalysisTemplate
 metadata:
@@ -19,10 +24,13 @@ spec:
     - name: prometheus
       value: http://kube-prometheus-stack-prometheus.monitoring.svc:9090
   metrics:
-    # Guard: never judge on too little traffic. Neither condition true → Inconclusive → rollout pauses.
+    # Guard: never judge on too little traffic. Neither condition true → Inconclusive. One low reading is
+    # tolerated (5 % of 40 rps is ~240 requests per 2m, so a single dip below 200 is noise); two → rollout pauses.
     - name: sample-size
+      initialDelay: 2m
       interval: 1m
       count: 2
+      inconclusiveLimit: 1
       successCondition: "len(result) > 0 && result[0] >= 200"
       failureCondition: "false"
       provider:
@@ -30,8 +38,9 @@ spec:
           address: "{{args.prometheus}}"
           query: |
             sum(increase(http_server_requests_seconds_count{
-              namespace="{{args.namespace}}", rollouts_pod_template_hash="{{args.canary-hash}}"}[2m]))
+              namespace="{{args.namespace}}", rollouts_pod_template_hash="{{args.canary-hash}}", uri!~"/actuator.*"}[2m]))
     - name: success-rate
+      initialDelay: 2m
       interval: 1m
       count: 2
       failureLimit: 0
@@ -42,11 +51,12 @@ spec:
           address: "{{args.prometheus}}"
           query: |
             sum(rate(http_server_requests_seconds_count{
-              namespace="{{args.namespace}}", rollouts_pod_template_hash="{{args.canary-hash}}", status!~"5.."}[2m]))
+              namespace="{{args.namespace}}", rollouts_pod_template_hash="{{args.canary-hash}}", uri!~"/actuator.*", status!~"5.."}[2m]))
             /
             sum(rate(http_server_requests_seconds_count{
-              namespace="{{args.namespace}}", rollouts_pod_template_hash="{{args.canary-hash}}"}[2m]))
+              namespace="{{args.namespace}}", rollouts_pod_template_hash="{{args.canary-hash}}", uri!~"/actuator.*"}[2m]))
     - name: latency-p95
+      initialDelay: 2m
       interval: 1m
       count: 2
       failureLimit: 0
@@ -57,4 +67,4 @@ spec:
           address: "{{args.prometheus}}"
           query: |
             histogram_quantile(0.95, sum by (le) (rate(http_server_requests_seconds_bucket{
-              namespace="{{args.namespace}}", rollouts_pod_template_hash="{{args.canary-hash}}"}[2m])))
+              namespace="{{args.namespace}}", rollouts_pod_template_hash="{{args.canary-hash}}", uri!~"/actuator.*"}[2m])))
