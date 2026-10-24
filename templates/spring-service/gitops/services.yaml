@@ -1,0 +1,26 @@
+# Argo Rollouts rewrites both selectors with the stable/canary pod-template hash.
+apiVersion: v1
+kind: Service
+metadata:
+  name: [[ .Name ]]-stable
+  namespace: svc-[[ .Name ]]
+spec:
+  selector:
+    app.kubernetes.io/name: [[ .Name ]]
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: [[ .Name ]]-canary
+  namespace: svc-[[ .Name ]]
+spec:
+  selector:
+    app.kubernetes.io/name: [[ .Name ]]
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

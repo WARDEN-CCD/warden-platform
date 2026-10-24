@@ -1,0 +1,21 @@
+# Golden-path delivery: build, scan, sign, attest and promote run in Warden's platform workflow (ADR-009).
+# The caller grants the maximum permissions; the reusable workflow narrows them per job.
+name: delivery
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions: {}
+
+jobs:
+  delivery:
+    uses: [[ .Org ]]/warden-platform/.github/workflows/build-sign-attest.yml@[[ .PlatformRef ]]
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    secrets:
+      WARDEN_PROMOTER_PRIVATE_KEY: ${{ secrets.WARDEN_PROMOTER_PRIVATE_KEY }}

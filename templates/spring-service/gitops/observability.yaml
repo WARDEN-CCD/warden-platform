@@ -1,0 +1,18 @@
+# rollouts-pod-template-hash becomes the Prometheus label rollouts_pod_template_hash, which the
+# warden-canary analysis uses to compare canary pods against the SLO.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: [[ .Name ]]
+  namespace: svc-[[ .Name ]]
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: [[ .Name ]]
+  podTargetLabels:
+    - rollouts-pod-template-hash
+    - app.kubernetes.io/name
+  podMetricsEndpoints:
+    - port: http
+      path: /actuator/prometheus
+      interval: 15s

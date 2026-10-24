@@ -1,0 +1,28 @@
+spring:
+  application:
+    name: [[ .Name ]]
+  threads:
+    virtual:
+      enabled: true
+server:
+  port: 8080
+  shutdown: graceful
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  metrics:
+    distribution:
+      # Canary analysis reads http_server_requests_seconds_bucket (warden-canary ClusterAnalysisTemplate).
+      percentiles-histogram:
+        http.server.requests: true
+warden:
+  demo:
+    # Change these in a commit to ship a deliberately faulty (but signed) release for experiment E3.
+    error-rate: 0.0
+    latency-ms: 0
