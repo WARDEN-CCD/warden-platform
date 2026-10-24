@@ -242,7 +242,9 @@ func (s *scaffold) deliver(noMerge bool) error {
 	digest, err := registry.AnonymousDigest(pkg, s.sha)
 	if err != nil {
 		fmt.Printf("▶ make the image public (ADR-028: GitHub has no API for this)\n"+
-			"  Open %s → Danger Zone → Change visibility → Public\n", settings)
+			"  Open %s → Danger Zone → Change visibility → Public\n"+
+			"  If Public is greyed out, allow it once for the org: https://github.com/organizations/%s/settings/packages\n"+
+			"  → Package creation → Public\n", settings, render.Org)
 		openBrowser(settings)
 		for err != nil {
 			if time.Now().After(s.deadline) {
