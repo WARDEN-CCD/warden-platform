@@ -1,4 +1,5 @@
-# DRAFT — encodes ADR-015; exercised on kind (E3), not yet signed off.
+# Encodes ADR-015. Exercised on kind in E3 (2026-10-25): 10/10 faulty releases aborted, 10/10 healthy promoted
+# (hub evidence/rollbacks/summary-2026-10-25T09.json).
 # Canary health for every Warden service. Used by the Rollout steps generated from the service template:
 #   analysis:
 #     templates: [{templateName: warden-canary, clusterScope: true}]
