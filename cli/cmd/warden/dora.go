@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -23,6 +24,8 @@ var fromRE = regexp.MustCompile(`from ([0-9a-f]{7,40})`)
 func cmdDora(args []string) error {
 	fs := flag.NewFlagSet("dora", flag.ContinueOnError)
 	since := fs.String("since", time.Now().AddDate(0, 0, -30).Format("2006-01-02"), "window start: YYYY-MM-DD or an RFC 3339 timestamp, UTC")
+	until := fs.String("until", "", "window end: YYYY-MM-DD or an RFC 3339 timestamp, UTC (default: now)")
+	bySvc := fs.Bool("by-service", false, "also report each service separately")
 	asJSON := fs.Bool("json", false, "print JSON (for evidence/dora)")
 	if _, err := parse(fs, args); err != nil {
 		return err
@@ -31,23 +34,54 @@ func cmdDora(args []string) error {
 	if err != nil {
 		return err
 	}
+	to := time.Now().UTC()
+	if *until != "" {
+		if to, err = parseSince(*until); err != nil {
+			return err
+		}
+	}
 	deps, err := fetchDeployments(from)
 	if err != nil {
 		return err
 	}
-	m := dora.Compute(deps, from, time.Now().UTC())
+	overall := dora.Compute(deps, from, to)
+	perService := map[string]dora.Metrics{}
+	if *bySvc {
+		group := map[string][]dora.Deployment{}
+		for _, d := range deps {
+			group[d.Service] = append(group[d.Service], d)
+		}
+		for svc, ds := range group {
+			perService[svc] = dora.Compute(ds, from, to)
+		}
+	}
 	if *asJSON {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
-		return enc.Encode(m)
+		if !*bySvc {
+			return enc.Encode(overall)
+		}
+		return enc.Encode(map[string]any{"overall": overall, "services": perService})
 	}
-	fmt.Printf("DORA metrics %s → %s (%d deployments, %d failed)\n", m.From.Format("2006-01-02"), m.To.Format("2006-01-02"), m.Deployments, m.Failed)
+	printMetrics("overall", overall)
+	services := make([]string, 0, len(perService))
+	for svc := range perService {
+		services = append(services, svc)
+	}
+	sort.Strings(services)
+	for _, svc := range services {
+		printMetrics(svc, perService[svc])
+	}
+	return nil
+}
+
+func printMetrics(label string, m dora.Metrics) {
+	fmt.Printf("DORA metrics %s, %s → %s (%d deployments, %d failed)\n", label, m.From.Format("2006-01-02 15:04"), m.To.Format("2006-01-02 15:04"), m.Deployments, m.Failed)
 	fmt.Printf("  deployment frequency        %.2f per day\n", m.DeploymentsPerDay)
 	fmt.Printf("  change lead time (median)   %.2f h\n", m.MedianLeadTimeHours)
 	fmt.Printf("  change fail rate            %.1f%%\n", 100*m.ChangeFailRate)
 	fmt.Printf("  failed deployment recovery  %.1f min (median)\n", m.MedianRecoveryTimeMinutes)
 	fmt.Printf("  deployment rework rate      %.1f%%\n", 100*m.ReworkRate)
-	return nil
 }
 
 // parseSince accepts a day or an exact instant. A timestamp lets a window start after deployments that were
@@ -85,7 +119,15 @@ func fetchDeployments(from time.Time) ([]dora.Deployment, error) {
 		if err := gh.API(&statuses, fmt.Sprintf("repos/%s/deployments/%d/statuses?per_page=10", gitops, d.ID)); err != nil || len(statuses) == 0 {
 			continue
 		}
-		final := statuses[0] // newest first
+		// Newest first. A deployment that a later one superseded ends in `inactive`; its outcome is the newest
+		// success or failure before that.
+		final := statuses[0]
+		for _, s := range statuses {
+			if s.State == "success" || s.State == "failure" {
+				final = s
+				break
+			}
+		}
 		if final.State != "success" && final.State != "failure" || final.CreatedAt.Before(from) {
 			continue
 		}
@@ -94,12 +136,14 @@ func fetchDeployments(from time.Time) ([]dora.Deployment, error) {
 		// (services deploy concurrently). The promotion that deployed this service is the newest commit that
 		// touched its directory, reachable from that revision.
 		var promotions []struct {
+			SHA    string `json:"sha"`
 			Commit struct {
 				Message string `json:"message"`
 			} `json:"commit"`
 		}
 		path := "apps/" + strings.TrimPrefix(d.Environment, "svc-")
 		if gh.API(&promotions, fmt.Sprintf("repos/%s/commits?sha=%s&path=%s&per_page=1", gitops, d.SHA, path)) == nil && len(promotions) == 1 {
+			dep.Key = promotions[0].SHA
 			if m := fromRE.FindStringSubmatch(promotions[0].Commit.Message); m != nil {
 				var src struct {
 					Commit struct {
@@ -117,5 +161,5 @@ func fetchDeployments(from time.Time) ([]dora.Deployment, error) {
 		}
 		out = append(out, dep)
 	}
-	return out, nil
+	return dora.Collapse(out), nil
 }
