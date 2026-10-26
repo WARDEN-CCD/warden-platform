@@ -22,12 +22,12 @@ var fromRE = regexp.MustCompile(`from ([0-9a-f]{7,40})`)
 
 func cmdDora(args []string) error {
 	fs := flag.NewFlagSet("dora", flag.ContinueOnError)
-	since := fs.String("since", time.Now().AddDate(0, 0, -30).Format("2006-01-02"), "window start (YYYY-MM-DD)")
+	since := fs.String("since", time.Now().AddDate(0, 0, -30).Format("2006-01-02"), "window start: YYYY-MM-DD or an RFC 3339 timestamp, UTC")
 	asJSON := fs.Bool("json", false, "print JSON (for evidence/dora)")
 	if _, err := parse(fs, args); err != nil {
 		return err
 	}
-	from, err := time.Parse("2006-01-02", *since)
+	from, err := parseSince(*since)
 	if err != nil {
 		return err
 	}
@@ -48,6 +48,19 @@ func cmdDora(args []string) error {
 	fmt.Printf("  failed deployment recovery  %.1f min (median)\n", m.MedianRecoveryTimeMinutes)
 	fmt.Printf("  deployment rework rate      %.1f%%\n", 100*m.ReworkRate)
 	return nil
+}
+
+// parseSince accepts a day or an exact instant. A timestamp lets a window start after deployments that were
+// recorded only because the notifications controller (re)started and re-announced the current state.
+func parseSince(s string) (time.Time, error) {
+	if t, err := time.Parse(time.RFC3339, s); err == nil {
+		return t.UTC(), nil
+	}
+	t, err := time.Parse("2006-01-02", s)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("--since %q: want YYYY-MM-DD or RFC 3339 (2026-10-26T10:00:00Z)", s)
+	}
+	return t, nil
 }
 
 func fetchDeployments(from time.Time) ([]dora.Deployment, error) {
@@ -77,13 +90,17 @@ func fetchDeployments(from time.Time) ([]dora.Deployment, error) {
 			continue
 		}
 		dep := dora.Deployment{Service: d.Environment, State: final.State, DeployedAt: final.CreatedAt}
-		var commit struct {
+		// An Application's sync revision is the gitops repo's HEAD, which can be another service's promotion
+		// (services deploy concurrently). The promotion that deployed this service is the newest commit that
+		// touched its directory, reachable from that revision.
+		var promotions []struct {
 			Commit struct {
 				Message string `json:"message"`
 			} `json:"commit"`
 		}
-		if gh.API(&commit, "repos/"+gitops+"/commits/"+d.SHA) == nil {
-			if m := fromRE.FindStringSubmatch(commit.Commit.Message); m != nil {
+		path := "apps/" + strings.TrimPrefix(d.Environment, "svc-")
+		if gh.API(&promotions, fmt.Sprintf("repos/%s/commits?sha=%s&path=%s&per_page=1", gitops, d.SHA, path)) == nil && len(promotions) == 1 {
+			if m := fromRE.FindStringSubmatch(promotions[0].Commit.Message); m != nil {
 				var src struct {
 					Commit struct {
 						Message string `json:"message"`
