@@ -14,6 +14,39 @@ type Deployment struct {
 	DeployedAt  time.Time // when the final status was recorded
 	CommitAt    time.Time // author time of the source commit that was deployed
 	CommitTitle string    // first line of the source commit message (conventional commit)
+	Key         string    // gitops promotion commit that was deployed; records with the same Service and Key are one deployment
+}
+
+// Collapse merges ledger records that describe the same deployment. Argo CD announces every new gitops revision for
+// every Application, so one promotion of one service is recorded again each time another service's promotion
+// moves the repository's HEAD. Records with the same Service and Key become one: a failure wins over a success
+// (the canary was aborted after the sync was announced), and DeployedAt is the earliest record of that state.
+// Records without a Key are kept as they are.
+func Collapse(deps []Deployment) []Deployment {
+	type id struct{ service, key string }
+	var out []Deployment
+	at := map[id]int{}
+	for _, d := range deps {
+		if d.Key == "" {
+			out = append(out, d)
+			continue
+		}
+		k := id{d.Service, d.Key}
+		i, seen := at[k]
+		if !seen {
+			at[k] = len(out)
+			out = append(out, d)
+			continue
+		}
+		cur := out[i]
+		switch {
+		case d.State == "failure" && cur.State != "failure":
+			out[i] = d
+		case d.State == cur.State && d.DeployedAt.Before(cur.DeployedAt):
+			out[i] = d
+		}
+	}
+	return out
 }
 
 // Metrics are computed over the deployments in [From, To).
