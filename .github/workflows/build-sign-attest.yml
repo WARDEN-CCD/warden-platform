@@ -229,16 +229,20 @@ jobs:
               -c user.email="warden-promoter[bot]@users.noreply.github.com" \
               commit -am "deploy(${svc}): ${DIGEST:7:12} from ${GITHUB_SHA::12}"
           git push "https://x-access-token:${GH_TOKEN}@github.com/${gitops}.git" "$branch"
+          head="$(git rev-parse HEAD)"
           gh pr create --repo "$gitops" --head "$branch" --label digest-only \
             --title "deploy(${svc}): ${DIGEST:7:12}" \
             --body "Source: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA}"
           # Merge it ourselves. `--auto` does not work here: GitHub's auto-merge ignores ruleset bypass, so the PR
           # stays blocked on the review rule for ever (found 2026-10-26). This app is the bypass actor of main-review
           # (warden setup-apps), so a direct merge is allowed, but only once the required digest-only check has passed:
-          # the API refuses until then, so retry. The token has no checks permission, hence retry, not `gh pr checks`.
+          # the API refuses until then, so retry. digest-only is required by ruleset main-digest-only, which has no
+          # bypass actors, so this app cannot skip it. The token has no checks permission, hence retry, not
+          # `gh pr checks`. --match-head-commit pins the merge to the commit this job pushed: if the branch moves,
+          # the merge is refused instead of landing a different head under review bypass.
           merged=""
           for _ in $(seq 1 60); do
-            if gh pr merge --repo "$gitops" --squash "$branch" 2>merge.err; then merged=1; break; fi
+            if gh pr merge --repo "$gitops" --squash --match-head-commit "$head" "$branch" 2>merge.err; then merged=1; break; fi
             sleep 10
           done
           if [ -z "$merged" ]; then
