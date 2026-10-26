@@ -198,6 +198,13 @@ func wirePromoter(appID int64, pemPath string) error {
 	if err := gh.API(nil, "-X", "PATCH", gitops, "-F", "allow_auto_merge=true"); err != nil {
 		return err
 	}
+	// The promote job opens its PR with --label digest-only, and `gh pr create` refuses a label that does not exist.
+	// The first live run of that job would otherwise fail after pushing its branch.
+	if _, err := gh.Run("", "gh", "label", "create", "digest-only", "--repo", render.Org+"/warden-gitops",
+		"--color", "0e8a16", "--description", "Promotion PR that changes exactly one image digest (opened by the promoter app)",
+		"--force"); err != nil {
+		return err
+	}
 	var rulesets []struct {
 		ID   int64  `json:"id"`
 		Name string `json:"name"`
@@ -228,7 +235,7 @@ func wirePromoter(appID int64, pemPath string) error {
 			return err
 		}
 	}
-	fmt.Println("  wired: org variable + secret, auto-merge on warden-gitops, main-review bypass (PRs only)")
+	fmt.Println("  wired: org variable + secret, auto-merge and the digest-only label on warden-gitops, main-review bypass (PRs only)")
 	return nil
 }
 
