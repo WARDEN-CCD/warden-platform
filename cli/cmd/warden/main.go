@@ -25,7 +25,7 @@ Usage:
   warden render <name> --out DIR [--digest sha256:...]                    render the template only
   warden verify <image@sha256:...> [--policy-ref REF | --policy-file F]   run admission's checks locally
   warden status <name>                                                    rollout state of a service
-  warden dora [--since YYYY-MM-DD] [--json]                               DORA metrics from GitHub
+  warden dora [--since T] [--until T] [--by-service] [--json]             DORA metrics from GitHub (T: date or RFC 3339)
   warden setup-apps                                                       create the promoter/deployments GitHub Apps
   warden version
 `
