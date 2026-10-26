@@ -17,7 +17,7 @@ go test ./...
 | `warden render <name> --out DIR [--digest sha256:…]` | Renders the service repo (and, with a digest, its gitops directory) without touching GitHub. |
 | `warden verify <image@sha256:…> [--policy-ref REF \| --policy-file F]` | Runs admission's checks locally with cosign: signature + Rekor, provenance signer, provenance repo prefix and ref, SBOM, and vulnerabilities (audit). Constants are parsed from `warden-policy`'s ImageValidatingPolicy, so the CLI and the cluster cannot drift. Exit 1 if admission would deny. |
 | `warden status <name>` | Argo CD state, Rollout phase/step/canary weight, current image, latest AnalysisRun. |
-| `warden dora [--since YYYY-MM-DD] [--json]` | DORA five metrics from the GitHub Deployments ledger on `warden-gitops` (ADR-019). |
+| `warden dora [--since T] [--until T] [--by-service] [--json]` | DORA five metrics from the GitHub Deployments ledger on `warden-gitops` (ADR-019). T is a date or an RFC 3339 timestamp. Records of one promotion are merged into one deployment. |
 | `warden setup-apps` | Creates the `warden-ccd-promoter` and `warden-ccd-deployments` GitHub Apps through GitHub's manifest flow (two clicks each), saves keys to `~/.warden/`, sets the promoter org secret/variable, enables auto-merge and adds the promoter to `warden-gitops`' review bypass (PRs only). |
 
 Example `verify` output:
