@@ -204,6 +204,9 @@ jobs:
           private-key: ${{ secrets.WARDEN_PROMOTER_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
           repositories: ${{ inputs.gitops-repo }}
+          # Only what the job uses: push the promotion branch, open and merge the PR.
+          permission-contents: write
+          permission-pull-requests: write
       - name: Open digest-only PR in warden-gitops (ADR-013)
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
@@ -229,4 +232,16 @@ jobs:
           gh pr create --repo "$gitops" --head "$branch" --label digest-only \
             --title "deploy(${svc}): ${DIGEST:7:12}" \
             --body "Source: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA}"
-          gh pr merge --repo "$gitops" --auto --squash "$branch"
+          # Merge it ourselves. `--auto` does not work here: GitHub's auto-merge ignores ruleset bypass, so the PR
+          # stays blocked on the review rule for ever (found 2026-10-26). This app is the bypass actor of main-review
+          # (warden setup-apps), so a direct merge is allowed, but only once the required digest-only check has passed:
+          # the API refuses until then, so retry. The token has no checks permission, hence retry, not `gh pr checks`.
+          merged=""
+          for _ in $(seq 1 60); do
+            if gh pr merge --repo "$gitops" --squash "$branch" 2>merge.err; then merged=1; break; fi
+            sleep 10
+          done
+          if [ -z "$merged" ]; then
+            echo "::error::digest-only did not pass or the merge was refused within 10 minutes: $(tail -n 1 merge.err)"
+            exit 1
+          fi
