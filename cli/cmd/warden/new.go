@@ -63,7 +63,7 @@ func (s *scaffold) step(name string, fn func() (string, error)) error {
 func cmdNew(args []string) error {
 	fs := flag.NewFlagSet("new", flag.ContinueOnError)
 	owner := fs.String("owner", "warden-maintainers", "owning GitHub team")
-	ref := fs.String("platform-ref", "v0.1.0", "warden-platform workflow tag the service builds with")
+	ref := fs.String("platform-ref", "v0.1.2", "warden-platform workflow tag the service builds with")
 	dryRun := fs.Bool("dry-run", false, "render into a temporary directory and stop")
 	noMerge := fs.Bool("no-merge", false, "leave the warden-gitops PR for human review instead of merging it")
 	resume := fs.Bool("resume", false, "continue with an existing svc-<name> repo (e.g. after fixing a failed first build)")
