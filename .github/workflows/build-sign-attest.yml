@@ -1,5 +1,3 @@
-# DRAFT — encodes ADR-008/009/011/013; not yet run. Spike S1 validates the sign/attest path.
-#
 # The only workflow whose identity admission trusts (ADR-009). Services call it with:
 #   uses: WARDEN-CCD/warden-platform/.github/workflows/build-sign-attest.yml@vX.Y.Z
 # Jobs and why they are separate:
