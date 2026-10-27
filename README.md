@@ -24,7 +24,8 @@ Callers pin `@vX.Y.Z`; admission accepts only `refs/tags/v<semver>` identities. 
 3. Update the callers: `.github/workflows/delivery.yml` in each `svc-*` repo, and the default `platform-ref` in
    `cli/cmd/warden/main.go` and `new.go` (Renovate can do the callers once it is installed).
 
-Released: v0.1.0 (first). v0.1.1 (promote job merges its own digest-only PR; `warden dora` fixes) is merged on `main`
-and its release is to be created (hub STATUS.md).
+Released: v0.1.0 (first); v0.1.1 (promote job tries to merge its own digest-only PR; `warden dora` fixes). v0.1.1's merge
+fails in practice, because `gh pr merge` refuses a blocked PR on the client; the REST-endpoint fix is in this branch's
+pull request and becomes v0.1.2 (hub STATUS.md and ADR-034).
 
 Never move a tag. A bad release is fixed by a new release.
