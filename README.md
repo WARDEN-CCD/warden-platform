@@ -21,6 +21,10 @@ Callers pin `@vX.Y.Z`; admission accepts only `refs/tags/v<semver>` identities. 
 
 1. PR with the workflow change + security review (CODEOWNERS).
 2. Merge, then create release `vX.Y.Z` (immutable release; tag ruleset forbids moving/deleting `v*` tags).
-3. Renovate bumps callers in `svc-*` repos.
+3. Update the callers: `.github/workflows/delivery.yml` in each `svc-*` repo, and the default `platform-ref` in
+   `cli/cmd/warden/main.go` and `new.go` (Renovate can do the callers once it is installed).
+
+Released: v0.1.0 (first). v0.1.1 (promote job merges its own digest-only PR; `warden dora` fixes) is merged on `main`
+and its release is to be created (hub STATUS.md).
 
 Never move a tag. A bad release is fixed by a new release.
