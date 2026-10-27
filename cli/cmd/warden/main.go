@@ -101,7 +101,7 @@ func cmdRender(args []string) error {
 	fs := flag.NewFlagSet("render", flag.ContinueOnError)
 	out := fs.String("out", "", "output directory (required)")
 	owner := fs.String("owner", "", "owning GitHub team")
-	ref := fs.String("platform-ref", "v0.1.0", "warden-platform workflow tag")
+	ref := fs.String("platform-ref", "v0.1.2", "warden-platform workflow tag")
 	digest := fs.String("digest", "", "image digest for the gitops tree (sha256:...)")
 	pos, err := parse(fs, args)
 	if err != nil {
